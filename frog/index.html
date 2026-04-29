@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#1a2a1a">
+<title>Žabka — hra</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;user-select:none}
+  html,body{height:100%;overflow:hidden;background:#1a2a1a;font-family:-apple-system,system-ui,sans-serif;color:#fff;touch-action:manipulation}
+  #wrap{position:fixed;inset:0;display:flex;flex-direction:column}
+  #hud{display:flex;justify-content:space-between;align-items:center;padding:8px 16px;background:rgba(0,0,0,.55);z-index:5;font-size:15px;font-weight:700}
+  .back-link{color:#666;font-size:12px;font-weight:800;text-decoration:none;letter-spacing:.04em}
+  .back-link:active{color:#fff}
+  #hud .kolo{font-size:20px;color:#a8ff78}
+  #hud .lives{font-size:22px;letter-spacing:2px}
+  #hud .best{color:#aaa;font-size:14px}
+  #stage{position:relative;flex:1;overflow:hidden}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+  #controls{display:flex;align-items:center;justify-content:center;height:28vh;min-height:170px;background:#0a150a}
+  #dpad{display:flex;flex-direction:column;align-items:center;gap:5px}
+  .drow{display:flex;align-items:center;gap:5px}
+  .dbtn{width:74px;height:74px;font-size:34px;background:#16261a;color:#a8ff78;border:2px solid #2a4a2e;border-radius:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .07s;flex-shrink:0}
+  .dbtn:active,.dbtn.hold{background:#2a4a2e;color:#fff}
+  .dgap{width:74px;height:74px}
+  #overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.8);z-index:10;text-align:center;padding:20px}
+  #overlay h1{font-size:44px;color:#a8ff78;margin-bottom:12px;text-shadow:3px 3px 0 #000}
+  #overlay p{font-size:18px;margin-bottom:24px;color:#eee;line-height:1.7}
+  #overlay button{font-size:24px;padding:16px 40px;background:#a8ff78;color:#1a2a1a;border:none;border-radius:8px;font-weight:900;cursor:pointer;box-shadow:0 4px 0 #3d8b3d}
+  #overlay button:active{transform:translateY(2px);box-shadow:0 2px 0 #3d8b3d}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <a href="../" class="back-link">← HRY</a>
+    <div>KOLO: <span class="kolo" id="roundEl">1</span></div>
+    <div class="lives" id="livesEl">❤️❤️❤️</div>
+    <div class="best">BEST: <span id="bestEl">0</span></div>
+  </div>
+  <div id="stage">
+    <canvas id="game"></canvas>
+    <div id="overlay">
+      <h1>🐸 ŽABKA 🐸</h1>
+      <p>Dostaň se k rybníčku!<br>Vyhni se autům!<br><br>⬆ vpřed &nbsp;⬇ zpět &nbsp;⬅➡ do stran</p>
+      <button id="startBtn">START</button>
+    </div>
+  </div>
+  <div id="controls">
+    <div id="dpad">
+      <div class="drow"><button class="dbtn" id="upBtn">⬆</button></div>
+      <div class="drow">
+        <button class="dbtn" id="leftBtn">⬅</button>
+        <div class="dgap"></div>
+        <button class="dbtn" id="rightBtn">➡</button>
+      </div>
+      <div class="drow"><button class="dbtn" id="downBtn">⬇</button></div>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const COLS = 7;
+  const LIVES_START = 3;
+  const cv = document.getElementById('game');
+  const ctx = cv.getContext('2d');
+  const roundEl = document.getElementById('roundEl');
+  const livesEl = document.getElementById('livesEl');
+  const bestEl = document.getElementById('bestEl');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+
+  let W = 0, H = 0, DPR = 1;
+  let cellW = 0, cellH = 0, rows = 0, numLanes = 3;
+  let state = 'menu';
+  let round = 1, lives = LIVES_START;
+  let best = +localStorage.getItem('frog_best') || 0;
+  let frog = {}, lanes = [];
+  let lastT = 0;
+  let flashTimer = 0, flashCol = '';
+  let winTimer = 0;
+  let invTimer = 0;   // invincibility after death
+  let moveCooldown = 0;
+  const CAR_COLORS = ['#e63946','#f4a261','#9d4edd','#118ab2','#ff006e','#ffd93d'];
+
+  bestEl.textContent = best;
+
+  // ── Sprites ───────────────────────────────────────────────────────────────
+  // Frog top-down (8 cols × 6 rows)
+  const FROG = [
+    0,3,0,0,0,0,3,0,
+    3,1,1,1,1,1,1,3,
+    0,1,2,1,1,2,1,0,
+    0,1,1,1,1,1,1,0,
+    3,1,1,1,1,1,1,3,
+    0,3,0,1,1,0,3,0,
+  ];
+  const FROG_COLOR = { 1:'#4caf50', 2:'#f44336', 3:'#2e7d32' };
+
+  // Horizontal car (12 cols × 6 rows)
+  const CAR = [
+    0,3,1,1,1,1,1,1,1,1,3,0,
+    4,1,1,2,2,2,2,2,2,1,1,4,
+    1,1,1,2,2,2,2,2,2,1,1,1,
+    1,1,1,2,2,2,2,2,2,1,1,1,
+    4,1,1,2,2,2,2,2,2,1,1,4,
+    0,3,1,1,1,1,1,1,1,1,3,0,
+  ];
+  // 1=body(varies) 2=window 3=wheel 4=light/tail
+
+  function drawSprite(grid, cols, rows, x, y, w, h, palette, flipH) {
+    const px = w / cols, py = h / rows;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const v = grid[r * cols + (flipH ? cols - 1 - c : c)];
+        if (!v) continue;
+        ctx.fillStyle = palette[v] || '#fff';
+        ctx.fillRect(Math.floor(x + c * px), Math.floor(y + r * py), Math.ceil(px) + 1, Math.ceil(py) + 1);
+      }
+    }
+  }
+
+  // ── Resize ────────────────────────────────────────────────────────────────
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const r = cv.getBoundingClientRect();
+    W = r.width; H = r.height;
+    cv.width = W * DPR; cv.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    recalcGrid();
+  }
+  function recalcGrid() {
+    rows = numLanes + 2;
+    cellW = W / COLS;
+    cellH = H / rows;
+  }
+  window.addEventListener('resize', () => { resize(); });
+
+  // ── Game setup ────────────────────────────────────────────────────────────
+  function startRound(r) {
+    round = r;
+    numLanes = Math.min(8, 3 + Math.floor((r - 1) / 2));
+    recalcGrid();
+    resetFrog();
+    buildLanes();
+    roundEl.textContent = round;
+  }
+
+  function resetFrog() {
+    frog = { col: Math.floor(COLS / 2), row: numLanes + 1, alive: true };
+    invTimer = 0;
+  }
+
+  function buildLanes() {
+    lanes = [];
+    const baseSpeed = 62 + round * 9;
+    for (let i = 0; i < numLanes; i++) {
+      const dir = i % 2 === 0 ? 1 : -1;
+      const spd = baseSpeed * (0.82 + Math.random() * 0.36) * dir;
+      const n = Math.min(2, Math.ceil(round / 5));
+      const carW = cellW * 1.5;
+      const gap = (W + carW * n) / n;
+      const lane = [];
+      for (let j = 0; j < n; j++) {
+        const startX = dir > 0
+          ? -carW + j * gap
+          : W + j * gap;
+        lane.push({
+          x: startX,
+          speed: spd,
+          color: CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)],
+          w: carW,
+          h: cellH * 0.72,
+          row: i + 1,
+        });
+      }
+      lanes.push(lane);
+    }
+  }
+
+  // ── Frog movement ─────────────────────────────────────────────────────────
+  function moveFrog(dc, dr) {
+    if (state !== 'play') return;
+    if (!frog.alive || winTimer > 0 || flashTimer > 0.3) return;
+    if (moveCooldown > 0) return;
+
+    const nc = frog.col + dc;
+    const nr = frog.row + dr;
+    if (nc < 0 || nc >= COLS) return;
+    if (nr > numLanes + 1 || nr < 0) return;
+
+    frog.col = nc;
+    frog.row = nr;
+    moveCooldown = 0.18;
+
+    if (frog.row === 0) {
+      triggerWin();
+    } else {
+      checkCollision();
+    }
+  }
+
+  function triggerWin() {
+    winTimer = 1.4;
+    flashTimer = 0.35; flashCol = 'rgba(168,255,120,0.45)';
+    if (round > best) {
+      best = round;
+      localStorage.setItem('frog_best', best);
+      bestEl.textContent = best;
+    }
+  }
+
+  function checkCollision() {
+    if (!frog.alive || invTimer > 0) return;
+    if (frog.row === 0 || frog.row === numLanes + 1) return;
+    const laneIdx = frog.row - 1;
+    if (laneIdx < 0 || laneIdx >= lanes.length) return;
+    const frogL = frog.col * cellW + cellW * 0.18;
+    const frogR = (frog.col + 1) * cellW - cellW * 0.18;
+    for (const car of lanes[laneIdx]) {
+      if (car.x + car.w * 0.1 < frogR && car.x + car.w * 0.9 > frogL) {
+        killFrog(); return;
+      }
+    }
+  }
+
+  function killFrog() {
+    if (!frog.alive || invTimer > 0) return;
+    frog.alive = false;
+    lives = Math.max(0, lives - 1);
+    updateLivesHUD();
+    flashTimer = 0.7; flashCol = 'rgba(255,60,60,0.5)';
+
+    if (lives <= 0) {
+      setTimeout(() => {
+        state = 'over';
+        overlay.classList.remove('hidden');
+        overlay.querySelector('h1').textContent = '💀 KONEC!';
+        overlay.querySelector('p').innerHTML =
+          `Kolo: <b>${round}</b><br>Nejlepší kolo: <b>${best}</b>`;
+        startBtn.textContent = 'HRÁT ZNOVU';
+      }, 750);
+    } else {
+      setTimeout(() => {
+        if (state !== 'play') return;
+        resetFrog();
+        invTimer = 1.0;
+      }, 800);
+    }
+  }
+
+  function updateLivesHUD() {
+    livesEl.textContent = '❤️'.repeat(lives) + '🖤'.repeat(Math.max(0, LIVES_START - lives));
+  }
+
+  // ── Drawing ───────────────────────────────────────────────────────────────
+  function drawPond() {
+    // water
+    ctx.fillStyle = '#1565c0';
+    ctx.fillRect(0, 0, W, cellH);
+    // ripple stripes
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    for (let x = 0; x < W; x += 18) ctx.fillRect(x, 4, 10, 2);
+    for (let x = 9; x < W; x += 18) ctx.fillRect(x, 10, 10, 2);
+    // lily pads
+    const padCols = [1, 3, 5];
+    for (const pc of padCols) {
+      const cx = pc * cellW + cellW / 2;
+      const cy = cellH / 2;
+      ctx.fillStyle = '#2e7d32';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, cellW * 0.36, cellH * 0.38, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#388e3c';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, cellW * 0.22, cellH * 0.22, 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // label
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = `bold ${Math.round(cellH * 0.4)}px system-ui`;
+    ctx.textAlign = 'center';
+    ctx.fillText('🏊 RYBNÍK', W / 2, cellH * 0.78);
+  }
+
+  function drawStart() {
+    const y = (numLanes + 1) * cellH;
+    ctx.fillStyle = '#2a4a2a';
+    ctx.fillRect(0, y, W, cellH);
+    // grass texture
+    ctx.fillStyle = '#3a6a3a';
+    for (let x = 0; x < W; x += 14) ctx.fillRect(x, y + 4, 4, 8);
+    for (let x = 7; x < W; x += 14) ctx.fillRect(x, y + cellH - 12, 4, 8);
+  }
+
+  function drawRoad() {
+    for (let i = 0; i < numLanes; i++) {
+      const y = (i + 1) * cellH;
+      const odd = i % 2 === 0;
+      ctx.fillStyle = odd ? '#333344' : '#3a3344';
+      ctx.fillRect(0, y, W, cellH);
+      // center dashes
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      for (let x = 0; x < W; x += 28) ctx.fillRect(x, y + cellH / 2 - 1, 18, 2);
+      // edge lines
+      ctx.fillStyle = 'rgba(255,255,0,0.18)';
+      ctx.fillRect(0, y, W, 2);
+      ctx.fillRect(0, y + cellH - 2, W, 2);
+    }
+  }
+
+  function drawCars() {
+    const carSpriteRows = 6, carSpriteCols = 12;
+    for (const lane of lanes) {
+      for (const car of lane) {
+        const goingLeft = car.speed < 0;
+        const palette = { 1: car.color, 2: '#b3e5fc', 3: '#1a1a1a', 4: goingLeft ? '#ff5722' : '#ffeb3b' };
+        drawSprite(CAR, carSpriteCols, carSpriteRows,
+          car.x, car.row * cellH + (cellH - car.h) / 2,
+          car.w, car.h, palette, goingLeft);
+      }
+    }
+  }
+
+  function drawFrog() {
+    if (!frog.alive) return;
+    // flicker when invincible
+    if (invTimer > 0 && Math.floor(invTimer * 10) % 2 === 0) return;
+    const fw = cellW * 0.75, fh = cellH * 0.72;
+    const fx = frog.col * cellW + (cellW - fw) / 2;
+    const fy = frog.row * cellH + (cellH - fh) / 2;
+    drawSprite(FROG, 8, 6, fx, fy, fw, fh, FROG_COLOR, false);
+  }
+
+  function drawWinEffect() {
+    if (winTimer <= 0) return;
+    // sparkle stars
+    const t = winTimer;
+    ctx.fillStyle = `rgba(168,255,120,${Math.min(1, t * 1.5) * 0.5})`;
+    ctx.fillRect(0, 0, W, H);
+    const stars = 16;
+    for (let i = 0; i < stars; i++) {
+      const angle = (i / stars) * Math.PI * 2 + t * 3;
+      const r = W * 0.3 * (1 - t / 1.4) + 20;
+      const sx = W / 2 + Math.cos(angle) * r;
+      const sy = H / 2 + Math.sin(angle) * r;
+      const sz = 6 + Math.sin(t * 8 + i) * 4;
+      ctx.fillStyle = i % 3 === 0 ? '#ffd93d' : i % 3 === 1 ? '#fff' : '#a8ff78';
+      ctx.fillRect(sx - sz / 2, sy - sz / 2, sz, sz);
+    }
+  }
+
+  function draw() {
+    ctx.fillStyle = '#1a2a1a';
+    ctx.fillRect(0, 0, W, H);
+    drawPond();
+    drawRoad();
+    drawStart();
+    drawCars();
+    drawFrog();
+    if (flashTimer > 0) {
+      ctx.fillStyle = flashCol;
+      ctx.fillRect(0, 0, W, H);
+    }
+    drawWinEffect();
+  }
+
+  // ── Game loop ─────────────────────────────────────────────────────────────
+  function loop(t) {
+    if (state !== 'play') return;
+    const dt = Math.min(0.06, (t - lastT) / 1000);
+    lastT = t;
+
+    if (flashTimer > 0) flashTimer -= dt;
+    if (moveCooldown > 0) moveCooldown -= dt;
+    if (invTimer > 0) invTimer -= dt;
+
+    if (winTimer > 0) {
+      winTimer -= dt;
+      if (winTimer <= 0) startRound(round + 1);
+    } else {
+      // move cars
+      for (const lane of lanes) {
+        for (const car of lane) {
+          car.x += car.speed * dt;
+          if (car.speed > 0 && car.x > W + car.w) car.x = -car.w;
+          if (car.speed < 0 && car.x < -car.w) car.x = W + car.w;
+        }
+      }
+      // continuous collision (frog standing in lane)
+      checkCollision();
+    }
+
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ── Controls ──────────────────────────────────────────────────────────────
+  function bindBtn(id, dc, dr) {
+    const btn = document.getElementById(id);
+    const go = (e) => { e.preventDefault(); moveFrog(dc, dr); };
+    btn.addEventListener('touchstart', go, { passive: false });
+    btn.addEventListener('mousedown', go);
+  }
+  bindBtn('upBtn',    0, -1);
+  bindBtn('downBtn',  0, +1);
+  bindBtn('leftBtn', -1,  0);
+  bindBtn('rightBtn',+1,  0);
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowUp'    || e.key === 'w') moveFrog(0, -1);
+    if (e.key === 'ArrowDown'  || e.key === 's') moveFrog(0, +1);
+    if (e.key === 'ArrowLeft'  || e.key === 'a') moveFrog(-1, 0);
+    if (e.key === 'ArrowRight' || e.key === 'd') moveFrog(+1, 0);
+    if ((e.key === 'Enter' || e.key === ' ') && state !== 'play') startGame();
+  });
+
+  // ── Start ─────────────────────────────────────────────────────────────────
+  function startGame() {
+    round = 1; lives = LIVES_START;
+    updateLivesHUD();
+    overlay.classList.add('hidden');
+    state = 'play';
+    startRound(1);
+    lastT = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  startBtn.addEventListener('click', startGame);
+
+  resize();
+  draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#080818">
+<title>Světelný souboj</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;user-select:none}
+html,body{height:100%;overflow:hidden;background:#080818;font-family:-apple-system,system-ui,sans-serif;color:#fff;touch-action:manipulation}
+canvas{display:block;position:fixed;top:0;left:0;width:100%;height:100%}
+
+#btns{
+  position:fixed;bottom:0;left:0;right:0;
+  display:flex;gap:10px;
+  padding:10px 14px;
+  padding-bottom:max(12px,env(safe-area-inset-bottom));
+  height:115px;
+  z-index:10;
+  background:linear-gradient(transparent,rgba(8,8,24,0.96));
+}
+.btn{
+  flex:1;border:none;border-radius:18px;
+  font-size:12px;font-weight:900;letter-spacing:.6px;text-transform:uppercase;
+  cursor:pointer;
+  transition:transform .07s,filter .07s;
+  -webkit-tap-highlight-color:transparent;
+  display:flex;align-items:center;justify-content:center;
+}
+.btn:active{transform:scale(0.89);filter:brightness(1.5)}
+#b-red   {background:radial-gradient(ellipse at 50% 30%,#ff6677,#cc1122);color:#fff;text-shadow:0 0 8px rgba(255,255,255,.7);box-shadow:0 0 22px rgba(255,30,50,.6),inset 0 1px 0 rgba(255,255,255,.2)}
+#b-yellow{background:radial-gradient(ellipse at 50% 30%,#ffee55,#ddaa00);color:#2a1000;box-shadow:0 0 22px rgba(255,200,0,.6),inset 0 1px 0 rgba(255,255,255,.3)}
+#b-blue  {background:radial-gradient(ellipse at 50% 30%,#66aaff,#1144cc);color:#fff;text-shadow:0 0 8px rgba(255,255,255,.7);box-shadow:0 0 22px rgba(30,80,255,.6),inset 0 1px 0 rgba(255,255,255,.2)}
+
+#overlay{
+  position:fixed;inset:0;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  background:rgba(4,4,20,.92);z-index:20;gap:10px;
+}
+#overlay h1{font-size:34px;font-weight:900;color:#ffd93d;text-shadow:0 0 24px #ffaa00;text-align:center;line-height:1.1}
+.hint{font-size:14px;color:#aaa;text-align:center;line-height:1.65;max-width:290px;padding:0 20px}
+.hint b{color:#eee}
+.mix-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:2px 0}
+.mix-chip{
+  padding:5px 11px;border-radius:10px;font-size:13px;font-weight:700;
+  background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);
+}
+#start-btn{
+  margin-top:6px;
+  padding:15px 48px;font-size:20px;font-weight:900;
+  background:#ffd93d;color:#000;border:none;border-radius:14px;cursor:pointer;
+  box-shadow:0 0 24px rgba(255,200,0,.5);
+}
+#start-btn:active{transform:scale(0.95)}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<a href="../" style="position:fixed;top:12px;left:14px;z-index:11;color:#666;font-size:12px;font-weight:800;text-decoration:none;letter-spacing:.04em">← HRY</a>
+
+<div id="btns">
+  <button class="btn" id="b-red"    onpointerdown="fire('red')"   >ČERVENÁ</button>
+  <button class="btn" id="b-yellow" onpointerdown="fire('yellow')">ŽLUTÁ</button>
+  <button class="btn" id="b-blue"   onpointerdown="fire('blue')"  >MODRÁ</button>
+</div>
+
+<div id="overlay" id="ov">
+  <h1>⚡ SVĚTELNÝ<br>SOUBOJ</h1>
+  <div class="hint">Střílej paprsky správné barvy.<br>Smíchané barvy potřebují <b>2 zásahy</b>!</div>
+  <div class="mix-row">
+    <div class="mix-chip" style="color:#ff8800">🟠 = 🔴 + 🟡</div>
+    <div class="mix-chip" style="color:#44cc44">🟢 = 🔵 + 🟡</div>
+    <div class="mix-chip" style="color:#cc44ff">🟣 = 🔴 + 🔵</div>
+  </div>
+  <button id="start-btn" onclick="startGame()">HRÁT</button>
+</div>
+
+<script>
+const cv  = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const ov  = document.getElementById('overlay');
+
+// ── colour catalogue ───────────────────────────────────────────────────────
+const C = {
+  red:    {hex:'#ff3344', glow:'#ff1133', name:'Červená', comp:null},
+  blue:   {hex:'#3399ff', glow:'#1155ff', name:'Modrá',   comp:null},
+  yellow: {hex:'#ffdd00', glow:'#ffaa00', name:'Žlutá',   comp:null},
+  orange: {hex:'#ff8800', glow:'#ff5500', name:'Oranžová',comp:['red','yellow']},
+  green:  {hex:'#33cc44', glow:'#00aa22', name:'Zelená',  comp:['blue','yellow']},
+  violet: {hex:'#cc44ff', glow:'#9900ee', name:'Fialová', comp:['red','blue']},
+};
+
+// ── layout ─────────────────────────────────────────────────────────────────
+let W, H, PLAY_H, LANE_X, LANE_W;
+const BTN_H = 115;
+const BEAM_H = 20;   // beam visual half-height (full height = 2*BEAM_H)
+
+function resize() {
+  W = cv.width  = window.innerWidth;
+  H = cv.height = window.innerHeight;
+  PLAY_H  = H - BTN_H;
+  LANE_W  = Math.min(W * 0.66, 230);
+  LANE_X  = (W - LANE_W) / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── game state ─────────────────────────────────────────────────────────────
+let enemies, shots, particles, popups, banner;
+let lives, score, level, spawnT, lvlT, flashT;
+let running = false, eid = 0;
+const seenMixed = new Set();
+
+// ── level parameters ───────────────────────────────────────────────────────
+const POOLS = [
+  /* 1 */ ['red','blue','yellow'],
+  /* 2 */ ['red','blue','yellow'],
+  /* 3 */ ['red','blue','yellow','orange'],
+  /* 4 */ ['red','blue','yellow','orange'],
+  /* 5 */ ['red','blue','yellow','orange','green'],
+  /* 6 */ ['red','blue','yellow','orange','green'],
+  /* 7+*/ ['red','blue','yellow','orange','green','violet'],
+];
+
+function lvlCfg(lvl) {
+  const pool     = POOLS[Math.min(lvl - 1, POOLS.length - 1)];
+  const speed    = 80 + lvl * 18;                        // px/s base
+  const interval = Math.max(0.55, 2.5 - lvl * 0.18);    // spawn every N sec
+  const maxE     = Math.min(1 + Math.floor(lvl / 1.6), 7);
+  return { pool, speed, interval, maxE };
+}
+
+// ── spawn enemy ────────────────────────────────────────────────────────────
+function spawnEnemy() {
+  const c = lvlCfg(level);
+  if (enemies.length >= c.maxE) return;
+  // don't stack at the very top
+  if (enemies.some(e => e.y < 55)) return;
+
+  const color = c.pool[Math.floor(Math.random() * c.pool.length)];
+  const spd   = c.speed * (0.82 + Math.random() * 0.36);
+  enemies.push({ id: eid++, y: -BEAM_H * 2, color, spd });
+
+  // first time we see a mixed colour → show tutorial banner
+  if (C[color].comp && !seenMixed.has(color)) {
+    seenMixed.add(color);
+    const [a, b] = C[color].comp;
+    showBanner(`${C[color].name} = ${C[a].name} + ${C[b].name}`, color);
+  }
+}
+
+// ── player fires ───────────────────────────────────────────────────────────
+function fire(color) {
+  if (!running) return;
+  shots.push({ y: PLAY_H - BEAM_H - 4, color, spd: 500 });
+}
+
+// ── collision ──────────────────────────────────────────────────────────────
+function collide() {
+  outer:
+  for (let p = shots.length - 1; p >= 0; p--) {
+    const s = shots[p];
+    for (let e = enemies.length - 1; e >= 0; e--) {
+      const en = enemies[e];
+      if (Math.abs(s.y - en.y) > BEAM_H * 2.5) continue;
+
+      // shot always consumed on contact
+      shots.splice(p, 1);
+
+      if (s.color === en.color) {
+        // perfect match → destroy
+        burst(LANE_X + LANE_W / 2, en.y, en.color, 14);
+        score += 10 * level;
+        addPopup(LANE_X + LANE_W / 2, en.y - 14, '+' + (10 * level), en.color);
+        enemies.splice(e, 1);
+      } else if (C[en.color].comp && C[en.color].comp.includes(s.color)) {
+        // partial match → decompose to other component
+        burst(LANE_X + LANE_W / 2, en.y, s.color, 7);
+        en.color = C[en.color].comp.find(x => x !== s.color);
+      }
+      // wrong colour → shot gone, enemy unaffected
+
+      continue outer;
+    }
+  }
+}
+
+// ── particles ──────────────────────────────────────────────────────────────
+function burst(x, y, color, n) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.PI * 2 * i / n + Math.random() * 0.7;
+    const v = 60 + Math.random() * 140;
+    particles.push({
+      x, y,
+      vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+      hex: C[color].hex, glow: C[color].glow,
+      life: 1, dur: 0.35 + Math.random() * 0.3, r: 1.5 + Math.random() * 2,
+    });
+  }
+}
+
+// ── score popup text ───────────────────────────────────────────────────────
+function addPopup(x, y, text, color) {
+  popups.push({ x, y, text, hex: C[color].hex, life: 1, dur: 0.75 });
+}
+
+// ── tutorial banner ────────────────────────────────────────────────────────
+function showBanner(text, color) {
+  banner = { text, hex: C[color].hex, glow: C[color].glow, life: 1, dur: 2.8 };
+}
+
+// ── main loop ──────────────────────────────────────────────────────────────
+let lastTs = 0;
+function loop(ts) {
+  if (!running) return;
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  const c = lvlCfg(level);
+
+  spawnT -= dt;
+  if (spawnT <= 0) { spawnEnemy(); spawnT = c.interval; }
+
+  lvlT += dt;
+  if (lvlT >= 20) { level++; lvlT = 0; }
+
+  flashT = Math.max(0, flashT - dt * 4);
+
+  // move enemies down
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    enemies[i].y += enemies[i].spd * dt;
+    if (enemies[i].y > PLAY_H + BEAM_H * 2) {
+      enemies.splice(i, 1);
+      lives--;
+      flashT = 1;
+      if (lives <= 0) { endGame(); return; }
+    }
+  }
+
+  // move shots up
+  for (let i = shots.length - 1; i >= 0; i--) {
+    shots[i].y -= shots[i].spd * dt;
+    if (shots[i].y < -BEAM_H * 2) shots.splice(i, 1);
+  }
+
+  collide();
+
+  // particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vy += 180 * dt;
+    p.life -= dt / p.dur;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // popups
+  for (let i = popups.length - 1; i >= 0; i--) {
+    const p = popups[i];
+    p.y -= 45 * dt;
+    p.life -= dt / p.dur;
+    if (p.life <= 0) popups.splice(i, 1);
+  }
+
+  // banner
+  if (banner) {
+    banner.life -= dt / banner.dur;
+    if (banner.life <= 0) banner = null;
+  }
+
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── draw helpers ───────────────────────────────────────────────────────────
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+function drawBeam(cx, cy, widthRatio, color, alpha) {
+  const w  = LANE_W * widthRatio;
+  const h  = BEAM_H * 2;
+  const info = C[color];
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.shadowColor = info.glow;
+  ctx.shadowBlur  = 22;
+
+  // horizontal glow gradient — bright centre fading at edges
+  const g = ctx.createLinearGradient(cx - w / 2, 0, cx + w / 2, 0);
+  g.addColorStop(0,   'transparent');
+  g.addColorStop(0.1, info.hex);
+  g.addColorStop(0.5, '#ffffff');
+  g.addColorStop(0.9, info.hex);
+  g.addColorStop(1,   'transparent');
+  ctx.fillStyle = g;
+
+  roundRect(cx - w / 2, cy - h / 2, w, h, 7);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ── main draw ──────────────────────────────────────────────────────────────
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // background
+  ctx.fillStyle = '#080818';
+  ctx.fillRect(0, 0, W, H);
+
+  // damage flash
+  if (flashT > 0) {
+    ctx.fillStyle = `rgba(255,0,0,${flashT * 0.22})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // lane background
+  const lg = ctx.createLinearGradient(LANE_X, 0, LANE_X + LANE_W, 0);
+  lg.addColorStop(0,   'rgba(70,70,200,0)');
+  lg.addColorStop(0.5, 'rgba(70,70,200,0.055)');
+  lg.addColorStop(1,   'rgba(70,70,200,0)');
+  ctx.fillStyle = lg;
+  ctx.fillRect(LANE_X, 0, LANE_W, PLAY_H);
+
+  // lane edge lines
+  ctx.strokeStyle = 'rgba(130,130,255,0.18)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(LANE_X, 0); ctx.lineTo(LANE_X, PLAY_H);
+  ctx.moveTo(LANE_X + LANE_W, 0); ctx.lineTo(LANE_X + LANE_W, PLAY_H);
+  ctx.stroke();
+
+  // horizontal grid lines (sense of depth)
+  ctx.strokeStyle = 'rgba(70,70,180,0.09)';
+  for (let y = 0; y < PLAY_H; y += 38) {
+    ctx.beginPath();
+    ctx.moveTo(LANE_X, y); ctx.lineTo(LANE_X + LANE_W, y);
+    ctx.stroke();
+  }
+
+  // player defence line
+  ctx.save();
+  ctx.strokeStyle = 'rgba(180,210,255,0.45)';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = 'rgba(150,190,255,0.8)';
+  ctx.shadowBlur = 12;
+  ctx.beginPath();
+  ctx.moveTo(LANE_X, PLAY_H - 10);
+  ctx.lineTo(LANE_X + LANE_W, PLAY_H - 10);
+  ctx.stroke();
+  ctx.restore();
+
+  const cx = LANE_X + LANE_W / 2;
+
+  // enemy beams
+  for (const e of enemies) drawBeam(cx, e.y, 0.84, e.color, 1.0);
+
+  // player shots (slightly narrower, slightly transparent)
+  for (const s of shots) drawBeam(cx, s.y, 0.55, s.color, 0.88);
+
+  // particles
+  ctx.save();
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life * p.life);
+    ctx.fillStyle   = p.hex;
+    ctx.shadowColor = p.glow;
+    ctx.shadowBlur  = 9;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // score popups
+  ctx.save();
+  ctx.font = '700 17px system-ui';
+  ctx.textAlign = 'center';
+  for (const p of popups) {
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle   = p.hex;
+    ctx.shadowColor = p.hex;
+    ctx.shadowBlur  = 6;
+    ctx.fillText(p.text, p.x, p.y);
+  }
+  ctx.restore();
+
+  // tutorial banner (new mixed colour notification)
+  if (banner) {
+    const ba = Math.min(1, banner.life * 3); // fade in/out
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, ba);
+    const bw = Math.min(W - 40, 300);
+    const bx = (W - bw) / 2;
+    const by = PLAY_H * 0.38;
+
+    ctx.fillStyle = 'rgba(8,8,24,0.82)';
+    ctx.shadowColor = banner.glow;
+    ctx.shadowBlur = 18;
+    roundRect(bx, by - 22, bw, 46, 12);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = banner.hex;
+    ctx.font = '700 15px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('✨ Nová barva: ' + banner.text, W / 2, by + 5);
+    ctx.restore();
+  }
+
+  // HUD
+  ctx.save();
+  ctx.font = '700 17px system-ui';
+  ctx.fillStyle = 'rgba(210,210,255,0.85)';
+
+  ctx.textAlign = 'left';
+  ctx.fillText('Skóre: ' + score, 14, 28);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(160,160,220,0.6)';
+  ctx.fillText('Úroveň ' + level, W / 2, 28);
+
+  ctx.textAlign = 'right';
+  ctx.font = '18px system-ui';
+  let heartsStr = '';
+  for (let i = 0; i < 3; i++) heartsStr += i < lives ? '❤️' : '🖤';
+  ctx.fillText(heartsStr, W - 10, 28);
+  ctx.restore();
+}
+
+// ── game flow ──────────────────────────────────────────────────────────────
+function startGame() {
+  enemies   = [];
+  shots     = [];
+  particles = [];
+  popups    = [];
+  banner    = null;
+  seenMixed.clear();
+  lives  = 3;
+  score  = 0;
+  level  = 1;
+  spawnT = 0.4;
+  lvlT   = 0;
+  flashT = 0;
+
+  ov.style.display = 'none';
+  running = true;
+  lastTs  = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function endGame() {
+  running = false;
+  ov.innerHTML = `
+    <h1 style="color:#ff4455">KONEC HRY</h1>
+    <div class="hint" style="font-size:19px">
+      Skóre: <strong style="color:#ffd93d;font-size:36px">${score}</strong>
+    </div>
+    <div class="hint">Dosažená úroveň: <b style="color:#fff">${level}</b></div>
+    <button id="start-btn" onclick="startGame()">HRÁT ZNOVU</button>
+  `;
+  ov.style.display = 'flex';
+}
+</script>
+</body>
+</html>

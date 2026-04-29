@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#1a1a2e">
+<title>PIŠKVORKY</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;user-select:none}
+  html,body{height:100%;overflow:hidden;background:#1a1a2e;font-family:-apple-system,system-ui,sans-serif;color:#fff;touch-action:manipulation}
+  #wrap{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px}
+
+  /* ── MENU ── */
+  #menu{display:flex;flex-direction:column;align-items:center;gap:16px;width:100%;max-width:340px}
+  #menu h1{font-size:30px;font-weight:900;text-align:center;line-height:1.2;margin-bottom:8px}
+  #menu h1 .x{color:#ff6b6b} #menu h1 .o{color:#4ecdc4}
+  .menu-btn{width:100%;padding:18px;font-size:20px;font-weight:800;border:none;border-radius:14px;cursor:pointer;transition:transform .1s,opacity .1s}
+  .menu-btn:active{transform:scale(.96);opacity:.85}
+  .btn-human{background:#2a2a4e;color:#fff;border:2px solid #4a4a7e}
+  .btn-robot{background:#2a2a4e;color:#fff;border:2px solid #4a4a7e}
+  #diffPanel{display:flex;flex-direction:column;gap:10px;width:100%}
+  #diffPanel p{text-align:center;color:#aaa;font-size:14px}
+  .diff-btn{width:100%;padding:15px;font-size:18px;font-weight:800;border:none;border-radius:12px;cursor:pointer;transition:transform .1s}
+  .diff-btn:active{transform:scale(.96)}
+  .diff-easy  {background:#1b5e20;color:#a8ff78;border:2px solid #2e7d32}
+  .diff-medium{background:#e65100;color:#ffe0b2;border:2px solid #f57c00}
+  .diff-hard  {background:#4a1a2e;color:#ff8a80;border:2px solid #c62828}
+  .back-btn{background:none;border:none;color:#666;font-size:14px;cursor:pointer;padding:8px}
+  .back-btn:active{color:#aaa}
+
+  /* ── GAME ── */
+  #game{display:none;flex-direction:column;align-items:center;gap:0;width:100%;max-width:380px}
+
+  #scorebar{display:flex;width:100%;margin-bottom:12px;gap:8px}
+  .sbox{flex:1;text-align:center;padding:10px 6px;border-radius:10px;font-size:13px;font-weight:700;line-height:1.3}
+  .sbox .sym{font-size:24px;display:block}
+  .sbox .num{font-size:28px;font-weight:900}
+  .sbox.x-box{background:#2a1a1a;border:2px solid #ff6b6b;color:#ff6b6b}
+  .sbox.d-box{background:#1e1e2e;border:2px solid #555;color:#888}
+  .sbox.o-box{background:#1a2a2a;border:2px solid #4ecdc4;color:#4ecdc4}
+  .sbox.active{box-shadow:0 0 0 3px currentColor}
+
+  #status{font-size:17px;font-weight:700;margin-bottom:16px;min-height:26px;text-align:center;color:#ddd}
+
+  #board{
+    display:grid;grid-template-columns:repeat(3,1fr);
+    gap:10px;width:100%;aspect-ratio:1;
+    background:#1a1a2e;
+  }
+  .cell{
+    background:#16162a;border-radius:14px;border:2px solid #2a2a4e;
+    display:flex;align-items:center;justify-content:center;
+    font-size:min(18vw,90px);font-weight:900;line-height:1;
+    cursor:pointer;transition:background .1s,border-color .1s;
+    aspect-ratio:1;
+  }
+  .cell:active:not(.taken){background:#222244}
+  .cell.taken{cursor:default}
+  .cell.x-cell{color:#ff6b6b}
+  .cell.o-cell{color:#4ecdc4}
+  .cell.win-cell{background:#1a2a1a;border-color:#a8ff78;animation:pulse .4s ease}
+  @keyframes pulse{0%{transform:scale(1)}50%{transform:scale(1.06)}100%{transform:scale(1)}}
+
+  #actions{display:flex;gap:10px;margin-top:18px;width:100%}
+  .act-btn{flex:1;padding:14px;font-size:16px;font-weight:800;border:none;border-radius:12px;cursor:pointer;transition:transform .1s}
+  .act-btn:active{transform:scale(.96)}
+  .btn-new{background:#a8ff78;color:#1a2a1a}
+  .btn-menu{background:#2a2a4e;color:#aaa;border:2px solid #3a3a5e}
+
+  #modeTag{margin-top:10px;font-size:13px;color:#555;text-align:center}
+
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+<a href="../" style="position:fixed;top:12px;left:14px;z-index:99;color:#666;font-size:12px;font-weight:800;text-decoration:none;letter-spacing:.04em">← HRY</a>
+<div id="wrap">
+
+  <!-- MENU -->
+  <div id="menu">
+    <h1><span class="x">✕</span> PIŠKVORKY <span class="o">○</span></h1>
+    <button class="menu-btn btn-human" id="btnHuman">👥 S ČLOVĚKEM</button>
+    <button class="menu-btn btn-robot" id="btnRobot">🤖 S ROBOTEM</button>
+    <div id="diffPanel" class="hidden">
+      <p>JAK DOBRÝ ROBOT?</p>
+      <button class="diff-btn diff-easy"   data-diff="easy">😊 LEHKÝ</button>
+      <button class="diff-btn diff-medium" data-diff="medium">😐 STŘEDNÍ</button>
+      <button class="diff-btn diff-hard"   data-diff="hard">😈 TĚŽKÝ</button>
+      <button class="back-btn" id="backDiff">← ZPĚT</button>
+    </div>
+  </div>
+
+  <!-- GAME -->
+  <div id="game">
+    <div id="scorebar">
+      <div class="sbox x-box" id="xBox">
+        <span class="sym" id="xSym">✕</span>
+        <span class="lbl" id="xLbl">HRÁČ 1</span>
+        <span class="num" id="xScore">0</span>
+      </div>
+      <div class="sbox d-box">
+        <span class="sym">＝</span>
+        <span class="lbl">REMÍZA</span>
+        <span class="num" id="dScore">0</span>
+      </div>
+      <div class="sbox o-box" id="oBox">
+        <span class="sym" id="oSym">○</span>
+        <span class="lbl" id="oLbl">HRÁČ 2</span>
+        <span class="num" id="oScore">0</span>
+      </div>
+    </div>
+
+    <div id="status">HRÁČ X ZAČÍNÁ</div>
+
+    <div id="board">
+      <div class="cell" data-i="0"></div><div class="cell" data-i="1"></div><div class="cell" data-i="2"></div>
+      <div class="cell" data-i="3"></div><div class="cell" data-i="4"></div><div class="cell" data-i="5"></div>
+      <div class="cell" data-i="6"></div><div class="cell" data-i="7"></div><div class="cell" data-i="8"></div>
+    </div>
+
+    <div id="actions">
+      <button class="act-btn btn-new" id="btnNew">ZNOVU</button>
+      <button class="act-btn btn-menu" id="btnMenu">MENU</button>
+    </div>
+    <div id="modeTag"></div>
+    <a href="../" style="margin-top:8px;color:#555;font-size:13px;font-weight:800;text-decoration:none;letter-spacing:.04em">← HRY</a>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ── Elements ───────────────────────────────────────────────────────────────
+  const menuEl   = document.getElementById('menu');
+  const gameEl   = document.getElementById('game');
+  const diffPanel= document.getElementById('diffPanel');
+  const cells    = Array.from(document.querySelectorAll('.cell'));
+  const statusEl = document.getElementById('status');
+  const xScore   = document.getElementById('xScore');
+  const oScore   = document.getElementById('oScore');
+  const dScore   = document.getElementById('dScore');
+  const xBox     = document.getElementById('xBox');
+  const oBox     = document.getElementById('oBox');
+  const xSym     = document.getElementById('xSym');
+  const oSym     = document.getElementById('oSym');
+  const xLbl     = document.getElementById('xLbl');
+  const oLbl     = document.getElementById('oLbl');
+  const modeTag  = document.getElementById('modeTag');
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  let board = Array(9).fill(null);
+  let current = 'X';           // whose turn: 'X' or 'O'
+  let gameOver = false;
+  let gameMode = 'human';      // 'human' | 'robot'
+  let difficulty = 'easy';
+  let scores = { X: 0, O: 0, D: 0 };
+  let robotRound = 0;          // counts games vs robot, to alternate sides
+  let humanSymbol = 'X';       // human's symbol in robot mode
+  let robotThinking = false;
+
+  const LINES = [
+    [0,1,2],[3,4,5],[6,7,8],
+    [0,3,6],[1,4,7],[2,5,8],
+    [0,4,8],[2,4,6],
+  ];
+
+  // ── Menu flow ──────────────────────────────────────────────────────────────
+  document.getElementById('btnHuman').onclick = () => {
+    gameMode = 'human';
+    startGame();
+  };
+  document.getElementById('btnRobot').onclick = () => {
+    diffPanel.classList.remove('hidden');
+    document.getElementById('btnHuman').classList.add('hidden');
+    document.getElementById('btnRobot').classList.add('hidden');
+  };
+  document.getElementById('backDiff').onclick = () => {
+    diffPanel.classList.add('hidden');
+    document.getElementById('btnHuman').classList.remove('hidden');
+    document.getElementById('btnRobot').classList.remove('hidden');
+  };
+  document.querySelectorAll('.diff-btn').forEach(btn => {
+    btn.onclick = () => {
+      difficulty = btn.dataset.diff;
+      gameMode = 'robot';
+      robotRound = 0;
+      scores = { X: 0, O: 0, D: 0 };
+      startGame();
+    };
+  });
+  document.getElementById('btnNew').onclick = () => startGame();
+  document.getElementById('btnMenu').onclick = () => {
+    gameEl.style.display = 'none';
+    menuEl.classList.remove('hidden');
+    diffPanel.classList.add('hidden');
+    document.getElementById('btnHuman').classList.remove('hidden');
+    document.getElementById('btnRobot').classList.remove('hidden');
+    scores = { X: 0, O: 0, D: 0 };
+    robotRound = 0;
+  };
+
+  // ── Start game ─────────────────────────────────────────────────────────────
+  function startGame() {
+    board = Array(9).fill(null);
+    gameOver = false;
+    robotThinking = false;
+
+    if (gameMode === 'robot') {
+      // Alternate: even rounds human=X (starts), odd rounds human=O
+      humanSymbol = robotRound % 2 === 0 ? 'X' : 'O';
+      robotRound++;
+    }
+
+    current = 'X'; // X always starts
+
+    updateLabels();
+    updateScoreDisplay();
+    renderBoard();
+    updateActiveBox();
+
+    menuEl.classList.add('hidden');
+    gameEl.style.display = 'flex';
+
+    if (gameMode === 'robot' && humanSymbol === 'O') {
+      // Robot goes first
+      statusEl.textContent = '🤖 ROBOT PŘEMÝŠLÍ…';
+      setTimeout(robotMove, 650);
+    } else {
+      setStatus();
+    }
+  }
+
+  function updateLabels() {
+    if (gameMode === 'human') {
+      xSym.textContent = '✕'; oSym.textContent = '○';
+      xLbl.textContent = 'Hráč 1'; oLbl.textContent = 'Hráč 2';
+      modeTag.textContent = 'Hráč vs Hráč';
+    } else {
+      const diffNames = { easy: '😊 LEHKÝ', medium: '😐 STŘEDNÍ', hard: '😈 TĚŽKÝ' };
+      if (humanSymbol === 'X') {
+        xSym.textContent = '✕'; oSym.textContent = '○';
+        xLbl.textContent = 'Ty'; oLbl.textContent = '🤖';
+      } else {
+        xSym.textContent = '✕'; oSym.textContent = '○';
+        xLbl.textContent = '🤖'; oLbl.textContent = 'Ty';
+      }
+      modeTag.textContent = `Robot: ${diffNames[difficulty]}`;
+    }
+  }
+
+  // ── Board rendering ────────────────────────────────────────────────────────
+  function renderBoard(winLine = null) {
+    cells.forEach((cell, i) => {
+      const v = board[i];
+      cell.textContent = v === 'X' ? '✕' : v === 'O' ? '○' : '';
+      cell.className = 'cell' +
+        (v === 'X' ? ' x-cell taken' : v === 'O' ? ' o-cell taken' : '');
+      if (winLine && winLine.includes(i)) cell.classList.add('win-cell');
+    });
+  }
+
+  function updateActiveBox() {
+    xBox.classList.toggle('active', current === 'X' && !gameOver);
+    oBox.classList.toggle('active', current === 'O' && !gameOver);
+  }
+
+  function updateScoreDisplay() {
+    xScore.textContent = scores.X;
+    oScore.textContent = scores.O;
+    dScore.textContent = scores.D;
+  }
+
+  function setStatus() {
+    if (gameMode === 'human') {
+      statusEl.textContent = `HRÁČ ${current === 'X' ? '✕' : '○'} NA TAHU`;
+    } else {
+      const isHuman = current === humanSymbol;
+      statusEl.textContent = isHuman ? 'TVŮJ TAH!' : '🤖 ROBOT PŘEMÝŠLÍ…';
+    }
+  }
+
+  // ── Player click ───────────────────────────────────────────────────────────
+  cells.forEach(cell => {
+    cell.addEventListener('click', () => {
+      const i = +cell.dataset.i;
+      if (gameOver || board[i] || robotThinking) return;
+      if (gameMode === 'robot' && current !== humanSymbol) return;
+      makeMove(i);
+    });
+  });
+
+  function makeMove(i) {
+    board[i] = current;
+    const result = checkResult();
+    renderBoard(result?.line);
+
+    if (result) {
+      endGame(result);
+      return;
+    }
+    current = current === 'X' ? 'O' : 'X';
+    updateActiveBox();
+
+    if (gameMode === 'robot' && current !== humanSymbol) {
+      robotThinking = true;
+      statusEl.textContent = '🤖 ROBOT PŘEMÝŠLÍ…';
+      setTimeout(robotMove, 480 + Math.random() * 200);
+    } else {
+      setStatus();
+    }
+  }
+
+  // ── End game ───────────────────────────────────────────────────────────────
+  function endGame(result) {
+    gameOver = true;
+    updateActiveBox();
+    if (result.winner === 'draw') {
+      scores.D++;
+      statusEl.textContent = '🤝 Remíza!';
+    } else {
+      scores[result.winner]++;
+      updateScoreDisplay();
+      if (gameMode === 'human') {
+        statusEl.textContent = `🏆 Vyhrál hráč ${result.winner === 'X' ? '✕' : '○'}!`;
+      } else {
+        const humanWon = result.winner === humanSymbol;
+        statusEl.textContent = humanWon ? '🎉 Vyhrál jsi!' : '🤖 Robot vyhrál!';
+      }
+    }
+    updateScoreDisplay();
+  }
+
+  // ── Check result ───────────────────────────────────────────────────────────
+  function checkResult() {
+    for (const [a, b, c] of LINES) {
+      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+        return { winner: board[a], line: [a, b, c] };
+      }
+    }
+    if (board.every(Boolean)) return { winner: 'draw', line: null };
+    return null;
+  }
+
+  // ── Robot AI ───────────────────────────────────────────────────────────────
+  function robotMove() {
+    robotThinking = false;
+    if (gameOver) return;
+    const robotSym = humanSymbol === 'X' ? 'O' : 'X';
+    const i = getBestMove(board, robotSym);
+    makeMove(i);
+  }
+
+  function getBestMove(b, sym) {
+    const empty = b.map((v, i) => v ? null : i).filter(i => i !== null);
+    if (difficulty === 'easy') return randomChoice(empty);
+    if (difficulty === 'medium') return mediumMove(b, sym, empty);
+    return hardMove(b, sym);
+  }
+
+  function randomChoice(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function findWin(b, sym) {
+    for (const [a, c, d] of LINES) {
+      const line = [b[a], b[c], b[d]];
+      const empties = [a, c, d].filter(i => !b[i]);
+      if (line.filter(v => v === sym).length === 2 && empties.length === 1) {
+        return empties[0];
+      }
+    }
+    return -1;
+  }
+
+  function mediumMove(b, sym, empty) {
+    const opp = sym === 'X' ? 'O' : 'X';
+    const win = findWin(b, sym);   if (win !== -1) return win;
+    const block = findWin(b, opp); if (block !== -1) return block;
+    if (!b[4]) return 4;           // center
+    const corners = [0,2,6,8].filter(i => !b[i]);
+    if (corners.length) return randomChoice(corners);
+    return randomChoice(empty);
+  }
+
+  function hardMove(b, sym) {
+    const opp = sym === 'X' ? 'O' : 'X';
+    let best = -Infinity, bestI = -1;
+    for (let i = 0; i < 9; i++) {
+      if (b[i]) continue;
+      b[i] = sym;
+      const score = minimax(b, false, sym, opp, 0);
+      b[i] = null;
+      if (score > best) { best = score; bestI = i; }
+    }
+    return bestI;
+  }
+
+  function minimax(b, maximizing, sym, opp, depth) {
+    for (const [a, c, d] of LINES) {
+      if (b[a] && b[a] === b[c] && b[a] === b[d]) {
+        return b[a] === sym ? 10 - depth : depth - 10;
+      }
+    }
+    if (b.every(Boolean)) return 0;
+    if (maximizing) {
+      let best = -Infinity;
+      for (let i = 0; i < 9; i++) {
+        if (b[i]) continue;
+        b[i] = sym;
+        best = Math.max(best, minimax(b, false, sym, opp, depth + 1));
+        b[i] = null;
+      }
+      return best;
+    } else {
+      let best = Infinity;
+      for (let i = 0; i < 9; i++) {
+        if (b[i]) continue;
+        b[i] = opp;
+        best = Math.min(best, minimax(b, true, sym, opp, depth + 1));
+        b[i] = null;
+      }
+      return best;
+    }
+  }
+})();
+</script>
+</body>
+</html>

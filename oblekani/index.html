@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Oblékání panenky</title>
+<style>
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+html, body { margin:0; padding:0; height:100%; overflow:hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  background: linear-gradient(160deg,#ffe8f4 0%,#fff3e0 100%);
+  display:flex; flex-direction:column; height:100dvh;
+  touch-action: manipulation;
+}
+
+/* ── STAGE ── */
+.stage {
+  flex:1 1 auto; min-height:0;
+  display:flex; align-items:center; justify-content:center;
+  padding:6px;
+}
+.stage-inner {
+  display:flex; align-items:center; justify-content:center;
+  width:100%; height:100%;
+}
+/* doll-wrap: logická velikost = scaled rozměry (nastavuje JS fitDoll) */
+.doll-wrap {
+  position:relative; flex-shrink:0;
+  filter: drop-shadow(0 8px 24px rgba(180,60,120,.20));
+}
+/* doll-canvas: vždy 300×620 — škáluje se transformem z fitDoll */
+#doll-canvas {
+  width:300px; height:620px;
+  position:relative;
+  transform-origin: top left;
+  overflow:visible;
+}
+.layer {
+  position:absolute;
+  top:0; left:0;
+  width:100%; height:100%;
+  display:block;
+  pointer-events:none;
+}
+/* PNG layers */
+img.layer { object-fit:fill; }
+/* SVG layers */
+svg.layer { overflow:visible; }
+
+/* ── CONTROLS ── */
+.controls {
+  flex:0 0 auto;
+  background:rgba(255,255,255,.90);
+  backdrop-filter:blur(12px);
+  border-top:3px solid #ffb6d1;
+  padding:8px 12px 14px;
+  display:flex; flex-direction:column; gap:7px;
+  max-height:52%; overflow-y:auto;
+}
+.row { display:flex; align-items:center; gap:8px; }
+.lbl { font-weight:800; font-size:12px; letter-spacing:.06em; width:52px; flex-shrink:0; color:#b03a7c; }
+.picker { background:#fff0f6; border-radius:14px; padding:5px 6px; flex:1; }
+.arrow {
+  width:46px; height:46px; border:none; border-radius:12px;
+  background:#ff9bc4; color:#fff; font-size:22px; font-weight:bold;
+  cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 3px 0 #d56fa0;
+}
+.arrow:active { transform:translateY(2px); box-shadow:none; }
+.pname { flex:1; text-align:center; font-weight:800; font-size:13px; letter-spacing:.04em; }
+.swatches { display:flex; gap:5px; flex-wrap:wrap; flex:1; }
+.swatch {
+  width:34px; height:34px; border-radius:50%;
+  border:3px solid #fff; box-shadow:0 2px 5px rgba(0,0,0,.18);
+  cursor:pointer; flex-shrink:0; transition:transform .12s;
+}
+.swatch.on { border-color:#ff3a8a; transform:scale(1.2); box-shadow:0 2px 10px rgba(255,58,138,.5); }
+.save {
+  width:100%; padding:13px; border:none; border-radius:16px;
+  background:linear-gradient(135deg,#ff6fa3,#ff3a8a);
+  color:#fff; font-size:17px; font-weight:800; letter-spacing:.06em;
+  cursor:pointer; box-shadow:0 3px 0 #c2206b; margin-top:2px;
+}
+.save:active { transform:translateY(2px); box-shadow:none; }
+</style>
+</head>
+<body>
+<a href="../" style="position:fixed;top:12px;left:14px;z-index:99;color:#c06090;font-size:12px;font-weight:800;text-decoration:none;letter-spacing:.04em;opacity:.7">← HRY</a>
+
+<div class="stage">
+<div class="stage-inner">
+<div class="doll-wrap" id="doll-wrap">
+<div id="doll-canvas">
+  <!--
+    LAYER ORDER (bottom → top):
+    1. hair-back  (PNG, grayscale, CSS-tinted)
+    2. body       (SVG, torso/arms/legs — behind outfit)
+    3. shoes      (PNG, pod outfitem — špičky vykouknou zpod sukně)
+    4. outfit     (PNG, full-color)
+    5. face       (SVG, vždy nad outfitem — nos/ústa vždy viditelné)
+    6. hair-front (PNG, grayscale, CSS-tinted)
+    7. acc        (SVG, crowns, hats…)
+  -->
+
+  <!-- 1 – HAIR BACK -->
+  <img id="l-hair-back" class="layer" src="" alt=""/>
+
+  <!-- 2 – BODY (torso, arms, legs — no face) -->
+  <svg id="l-body-svg" class="layer" viewBox="0 0 300 620" xmlns="http://www.w3.org/2000/svg">
+    <defs id="svg-defs"></defs>
+    <g id="g-body"></g>
+  </svg>
+
+  <!-- 3 – SHOES -->
+  <img id="l-shoes" class="layer" src="" alt=""/>
+
+  <!-- 4 – OUTFIT -->
+  <img id="l-outfit" class="layer" src="" alt=""/>
+
+  <!-- 5 – FACE (above outfit) -->
+  <svg id="l-face-svg" class="layer" viewBox="0 0 300 620" xmlns="http://www.w3.org/2000/svg">
+    <defs id="svg-face-defs"></defs>
+    <g id="g-face"></g>
+  </svg>
+
+  <!-- 6 – HAIR FRONT -->
+  <img id="l-hair-front" class="layer" src="" alt=""/>
+
+  <!-- 7 – ACCESSORIES (SVG overlay: crowns, hats, clown nose…) -->
+  <svg id="l-acc-svg" class="layer" viewBox="0 0 300 620" xmlns="http://www.w3.org/2000/svg">
+    <g id="g-acc"></g>
+  </svg>
+</div>
+</div>
+</div>
+</div>
+
+<div class="controls">
+  <div class="row"><div class="lbl">KŮŽE</div><div class="swatches" id="sw-skin"></div></div>
+  <div class="row"><div class="lbl">OČI</div><div class="swatches" id="sw-eye"></div></div>
+  <div class="row"><div class="lbl">VLASY</div><div class="swatches" id="sw-hair"></div></div>
+  <div class="row"><div class="lbl">ÚČES</div>
+    <div class="picker"><div style="display:flex;align-items:center;gap:5px">
+      <button class="arrow" id="hs-p">◀</button>
+      <div class="pname" id="n-hs"></div>
+      <button class="arrow" id="hs-n">▶</button>
+    </div></div></div>
+  <div class="row"><div class="lbl">ŠATY</div>
+    <div class="picker"><div style="display:flex;align-items:center;gap:5px">
+      <button class="arrow" id="ot-p">◀</button>
+      <div class="pname" id="n-ot"></div>
+      <button class="arrow" id="ot-n">▶</button>
+    </div></div></div>
+  <div class="row"><div class="lbl">BOTY</div>
+    <div class="picker"><div style="display:flex;align-items:center;gap:5px">
+      <button class="arrow" id="sh-p">◀</button>
+      <div class="pname" id="n-sh"></div>
+      <button class="arrow" id="sh-n">▶</button>
+    </div></div></div>
+  <button class="save" id="save">💾 ULOŽIT OBRÁZEK</button>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  LAYOUT — uprav tady pozice a velikosti jednotlivých vrstev
+//  tx    = posun vlevo/vpravo (px, v 300×620 souřadnicích)
+//  ty    = posun nahoru (záporné) / dolů (kladné) v px
+//  scale = velikost vrstvy (1.0 = plná, 0.5 = polovina)
+//  origin: kotva pro scale ("center top" / "center bottom" / "center center")
+// ═══════════════════════════════════════════════════════════
+const LAYOUT = {
+  hairBack:  { tx:  0, ty:   -20, scale: 0.7, origin: 'center top'    }, // vlasy za hlavou
+  body:      { tx:  0, ty:   0, scale: 1.0, origin: 'center top'    }, // tělo (ruce, nohy)
+  shoes:     { tx:  0, ty:   0, scale: 0.5, origin: 'center bottom' }, // boty
+  outfit:    { tx:  0, ty:   0, scale: 1.0, origin: 'center top'    }, // šaty
+  head:      { tx:  0, ty:   -20, scale: 0.7, origin: 'center top'    }, // celá hlava (ovál + obličej + krk + uši)
+  hairFront: { tx:  0, ty:   -20, scale: 0.7, origin: 'center top'    }, // vlasy před obličejem
+};
+
+// ─── COLOR UTILS ──────────────────────────────────────────
+const h2r = h=>{const x=h.replace('#','');return[parseInt(x.slice(0,2),16),parseInt(x.slice(2,4),16),parseInt(x.slice(4,6),16)];};
+const r2h = (r,g,b)=>'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+const lt = (h,t)=>{const[r,g,b]=h2r(h);return r2h(r+(255-r)*t,g+(255-g)*t,b+(255-b)*t);};
+const dk = (h,t)=>{const[r,g,b]=h2r(h);return r2h(r*(1-t),g*(1-t),b*(1-t));};
+
+// ─── PALETTES ─────────────────────────────────────────────
+const SKINS=[
+  {n:'Světlá',    f:'#fde0c8',s:'#d4a87c'},
+  {n:'Jemná',     f:'#f7cfaa',s:'#c89364'},
+  {n:'Zlatá',     f:'#e8b484',s:'#b87a42'},
+  {n:'Olivová',   f:'#c89060',s:'#906030'},
+  {n:'Tmavá',     f:'#8b5a32',s:'#5a3010'},
+  {n:'Tmavá II',  f:'#5a3a20',s:'#3a2010'},
+];
+const EYES=[
+  {n:'Hnědá',f:'#7a4a20'},
+  {n:'Modrá', f:'#3a88d0'},
+  {n:'Zelená',f:'#2e9640'},
+];
+
+// Hair colors → CSS filter to tint a GRAYSCALE PNG
+// The pipeline: sepia(1) converts gray→warm-brown, then hue-rotate+saturate shifts to desired color
+const HAIRS=[
+  {n:'Černá',       f:'#1a1a1a', filter:'brightness(0.08) saturate(0)'},
+  {n:'Tmavě hnědá', f:'#4a2c1a', filter:'sepia(1) saturate(200%) hue-rotate(340deg) brightness(0.45)'},
+  {n:'Světle hnědá',f:'#8b5a2b', filter:'sepia(1) saturate(180%) hue-rotate(345deg) brightness(0.78)'},
+  {n:'Zrzavá',      f:'#c14d1d', filter:'sepia(1) saturate(400%) hue-rotate(330deg) brightness(0.88)'},
+  {n:'Blond',       f:'#d8b840', filter:'sepia(1) saturate(120%) hue-rotate(28deg) brightness(1.30)'},
+  {n:'Peroxid',     f:'#ece0c0', filter:'sepia(0.15) saturate(30%) brightness(2.10)'},
+  {n:'Zelená',      f:'#2a9a40', filter:'sepia(1) saturate(500%) hue-rotate(78deg) brightness(1.05)'},
+  {n:'Modrá',       f:'#2060c0', filter:'sepia(1) saturate(500%) hue-rotate(172deg) brightness(1.10)'},
+  {n:'Fialová',     f:'#8020a8', filter:'sepia(1) saturate(500%) hue-rotate(255deg) brightness(0.92)'},
+];
+
+// ─── HAIRSTYLE MANIFEST ───────────────────────────────────
+// Each entry: id used for PNG filename, display name, optional SVG accessory
+const HS=[
+  {id:'01-long-loose',      name:'Dlouhé rozpuštěné'},
+  {id:'02-braid-shoulder',  name:'Cop přes rameno'},
+  {id:'03-pigtails',        name:'Dva culíky'},
+  {id:'04-braids',          name:'Dva copy'},
+  {id:'05-medium',          name:'Středně dlouhé'},
+  {id:'06-bob',             name:'Mikádo (bob)'},
+  {id:'07-pixie',           name:'Pixie cut'},
+  {id:'08-bald',            name:'Holá hlava'},
+  {id:'09-bun',             name:'Drdol'},
+  {id:'10-double-bun',      name:'Dva drdoly'},
+  {id:'11-afro',            name:'Afro'},
+  {id:'12-curly-long',      name:'Kudrny dlouhé'},
+  {id:'13-mohawk',          name:'Mohawk'},
+  {id:'14-princess',        name:'Princeznin účes',
+    acc:()=>`<path d="M 112 54 L 122 32 L 132 52 L 142 26 L 150 46 L 158 26 L 168 52 L 178 32 L 188 54 L 186 64 L 114 64 Z" fill="#ffd700" stroke="#a07800" stroke-width="1.5"/>
+      <circle cx="122" cy="40" r="4" fill="#ff3a8a"/><circle cx="140" cy="33" r="4" fill="#4090d0"/>
+      <circle cx="150" cy="50" r="4" fill="#ff3a8a"/><circle cx="160" cy="33" r="4" fill="#4090d0"/>
+      <circle cx="178" cy="40" r="4" fill="#ff3a8a"/>
+      <path d="M 112 64 L 188 64 L 186 70 L 114 70 Z" fill="#c09000"/>`},
+  {id:'15-headband',        name:'Čelenka s mašlí',
+    acc:()=>`<path d="M 90 75 C 120 62 180 62 210 75 L 210 85 C 180 72 120 72 90 85 Z" fill="#ff5599"/>
+      <path d="M 174 65 L 163 52 L 163 78 L 174 73 Z M 200 65 L 218 52 L 218 78 L 200 73 Z M 174 65 C 188 58 200 65 200 65 C 200 73 188 80 174 73 Z" fill="#ff3a8a"/>
+      <circle cx="188" cy="69" r="5" fill="#c2206b"/>`},
+  {id:'16-fairy-braid',     name:'Vrkoč pohádkový'},
+  {id:'17-punk',            name:'Punk sestřih'},
+];
+
+// ─── OUTFIT MANIFEST ──────────────────────────────────────
+const OT=[
+  {id:'01-elsa',      name:'Šaty Elsa'},
+  {id:'02-anna',      name:'Šaty Anna'},
+  {id:'03-snowwhite', name:'Šaty Sněhurka'},
+  {id:'04-cinderella',name:'Šaty Popelka'},
+  {id:'05-aurora',    name:'Šípková Růženka'},
+  {id:'06-shirt-skirt',name:'Tričko + sukně'},
+  {id:'07-shirt-jeans',name:'Tričko + džíny'},
+  {id:'08-shirt-shorts',name:'Tričko + kraťasy'},
+  {id:'09-summer-dress',name:'Letní šaty'},
+  {id:'10-hoodie',    name:'Mikina + tepláky'},
+  {id:'11-bikini',    name:'Plavky bikiny'},
+  {id:'12-swimsuit',  name:'Plavky jednodílné'},
+  {id:'13-ski',       name:'Lyžařská kombinéza'},
+  {id:'14-pyjamas',   name:'Pyžamo'},
+  {id:'15-tutu',      name:'Tutu baletka'},
+  {id:'16-witch',     name:'Čarodějnice',
+    acc:()=>`<path d="M 108 62 L 192 62 L 198 76 L 102 76 Z" fill="#1a1a1a"/>
+      <path d="M 128 62 L 172 62 L 150 -22 Z" fill="#1a1a1a"/>
+      <path d="M 108 62 L 192 62 L 190 69 L 110 69 Z" fill="#9c27b0"/>`},
+  {id:'17-pirate',    name:'Pirát',
+    acc:()=>`<path d="M 92 70 C 150 54 208 70 208 70 L 204 84 C 150 70 96 84 96 84 Z" fill="#d32f2f"/>
+      <path d="M 130 100 L 170 100 L 170 110 L 130 110 Z" fill="#1a1a1a"/>
+      <ellipse cx="172" cy="105" rx="8" ry="6" fill="#1a1a1a"/>`},
+  {id:'18-astronaut', name:'Kosmonaut'},
+  {id:'19-doctor',    name:'Doktor'},
+  {id:'20-queen',     name:'Královna',
+    acc:()=>`<path d="M 112 54 L 122 32 L 132 52 L 142 26 L 150 46 L 158 26 L 168 52 L 178 32 L 188 54 L 186 64 L 114 64 Z" fill="#ffd700" stroke="#a07800" stroke-width="1.5"/>
+      <circle cx="122" cy="40" r="4" fill="#ff3a8a"/><circle cx="140" cy="33" r="4" fill="#4090d0"/>
+      <circle cx="150" cy="50" r="4" fill="#ff3a8a"/><circle cx="160" cy="33" r="4" fill="#4090d0"/>
+      <circle cx="178" cy="40" r="4" fill="#ff3a8a"/>
+      <path d="M 112 64 L 188 64 L 186 70 L 114 70 Z" fill="#c09000"/>`},
+  {id:'21-clown',     name:'Klaun',
+    acc:()=>`<circle cx="150" cy="133" r="15" fill="#d32f2f"/>
+      <ellipse cx="150" cy="135" rx="10" ry="8" fill="#ff5555"/>`},
+  {id:'22-tank-leggings',name:'Tepláky + tílko'},
+];
+
+// ─── SHOES MANIFEST ───────────────────────────────────────
+const SH=[
+  {id:'00-barefoot',    name:'Bosky (žádné)'},
+  {id:'01-sneakers',    name:'Tenisky'},
+  {id:'02-heels',       name:'Lodičky'},
+  {id:'03-ballet-flat', name:'Balerínky'},
+  {id:'04-pointe',      name:'Špičky baletní'},
+  {id:'05-cowboy',      name:'Kovbojské holínky'},
+  {id:'06-wellies',     name:'Gumáky'},
+  {id:'07-sandals',     name:'Sandály'},
+  {id:'08-bunny-slipper',name:'Papuče králíčci'},
+  {id:'09-clown-shoes', name:'Klauní boty'},
+  {id:'10-rollerskates',name:'Kolečkové brusle'},
+  {id:'11-ski-boots',   name:'Lyže + lyžáky'},
+  {id:'12-flippers',    name:'Ploutve'},
+  {id:'13-snowshoes',   name:'Sněžnice'},
+  {id:'14-cleats',      name:'Kopačky'},
+  {id:'15-pink-boots',  name:'Růžové kozačky'},
+  {id:'16-paw-slippers',name:'Tlapky zvířátka'},
+];
+
+// ─── STATE ────────────────────────────────────────────────
+const st={skin:1,eyes:0,hair:4,hs:0,ot:5,sh:1};
+
+// ─── SVG DEFS ─────────────────────────────────────────────
+function buildBodyDefs(sk){
+  const f=sk.f;
+  return `
+  <radialGradient id="gFace" cx="42%" cy="35%" r="62%">
+    <stop offset="0%"  stop-color="${lt(f,.30)}"/>
+    <stop offset="55%" stop-color="${f}"/>
+    <stop offset="100%" stop-color="${dk(f,.18)}"/>
+  </radialGradient>
+  <linearGradient id="gLegL" x1="0" y1=".5" x2="1" y2=".5">
+    <stop offset="0%"  stop-color="${dk(f,.12)}"/><stop offset="38%" stop-color="${lt(f,.14)}"/>
+    <stop offset="100%" stop-color="${dk(f,.22)}"/>
+  </linearGradient>
+  <linearGradient id="gLegR" x1="1" y1=".5" x2="0" y2=".5">
+    <stop offset="0%"  stop-color="${dk(f,.12)}"/><stop offset="38%" stop-color="${lt(f,.14)}"/>
+    <stop offset="100%" stop-color="${dk(f,.22)}"/>
+  </linearGradient>
+  <linearGradient id="gArm" x1="0" y1=".5" x2="1" y2=".5">
+    <stop offset="0%"  stop-color="${dk(f,.18)}"/><stop offset="45%" stop-color="${lt(f,.10)}"/>
+    <stop offset="100%" stop-color="${dk(f,.20)}"/>
+  </linearGradient>`;
+}
+
+function buildFaceDefs(sk,ey){
+  const f=sk.f,e=ey.f;
+  return `
+  <radialGradient id="gFace" cx="42%" cy="35%" r="62%">
+    <stop offset="0%"  stop-color="${lt(f,.30)}"/>
+    <stop offset="55%" stop-color="${f}"/>
+    <stop offset="100%" stop-color="${dk(f,.18)}"/>
+  </radialGradient>
+  <radialGradient id="gEye" cx="38%" cy="32%" r="62%">
+    <stop offset="0%"  stop-color="${lt(e,.55)}"/><stop offset="55%" stop-color="${e}"/>
+    <stop offset="100%" stop-color="${dk(e,.40)}"/>
+  </radialGradient>
+  <clipPath id="ceL"><ellipse cx="114" cy="104" rx="16" ry="13"/></clipPath>
+  <clipPath id="ceR"><ellipse cx="186" cy="104" rx="16" ry="13"/></clipPath>
+  <filter id="blush"><feGaussianBlur stdDeviation="4"/></filter>`;
+}
+
+function renderBody(sk){
+  const f=sk.f,s=sk.s;
+  return `
+  <ellipse cx="122" cy="568" rx="22" ry="10" fill="url(#gLegL)"/>
+  <ellipse cx="178" cy="568" rx="22" ry="10" fill="url(#gLegR)"/>
+  <path d="M 112 294 C 108 360 110 430 115 495 C 118 528 120 550 121 562 L 133 562 C 134 550 133 528 131 495 C 128 430 128 360 126 294 Z" fill="url(#gLegL)"/>
+  <path d="M 188 294 C 192 360 190 430 185 495 C 182 528 180 550 179 562 L 167 562 C 166 550 167 528 169 495 C 172 430 172 360 174 294 Z" fill="url(#gLegR)"/>
+  <ellipse cx="119" cy="410" rx="9" ry="7" fill="${lt(f,.28)}" opacity=".5"/>
+  <ellipse cx="181" cy="410" rx="9" ry="7" fill="${lt(f,.28)}" opacity=".5"/>
+  <path d="M 103 172 C 88 180 80 215 77 255 C 74 280 74 306 77 318 L 90 315 C 90 300 91 276 94 252 C 97 218 104 186 108 174 Z" fill="url(#gArm)"/>
+  <path d="M 197 172 C 212 180 220 215 223 255 C 226 280 226 306 223 318 L 210 315 C 210 300 209 276 206 252 C 203 218 196 186 192 174 Z" fill="url(#gArm)"/>
+  <path d="M 77 317 C 72 318 68 322 69 327 C 70 333 76 336 82 334 C 87 333 91 328 90 323 Z" fill="url(#gFace)"/>
+  <path d="M 223 317 C 228 318 232 322 231 327 C 230 333 224 336 218 334 C 213 333 209 328 210 323 Z" fill="url(#gFace)"/>`;
+}
+
+function renderFace(ey,sk){
+  const f=sk.f,s=sk.s,e=ey.f;
+  return `
+  <path d="M 84 106 C 80 100 80 115 84 118 C 88 120 94 116 94 110 C 94 104 90 100 86 102 Z" fill="url(#gFace)"/>
+  <path d="M 216 106 C 220 100 220 115 216 118 C 212 120 206 116 206 110 C 206 104 210 100 214 102 Z" fill="url(#gFace)"/>
+  <path d="M 86 104 C 84 108 84 114 86 116" stroke="${s}" stroke-width="1.2" fill="none" opacity=".45"/>
+  <path d="M 214 104 C 216 108 216 114 214 116" stroke="${s}" stroke-width="1.2" fill="none" opacity=".45"/>
+  <path d="M 150 32 C 194 32 218 62 220 92 C 222 118 218 142 210 156 C 202 168 180 174 162 175 C 156 176 150 176 150 176 C 150 176 144 176 138 175 C 120 174 98 168 90 156 C 82 142 78 118 80 92 C 82 62 106 32 150 32 Z" fill="url(#gFace)"/>
+  <path d="M 90 152 C 98 170 120 175 138 176 M 210 152 C 202 170 180 175 162 176" stroke="${dk(f,.12)}" stroke-width="2" fill="none" opacity=".28"/>
+  <path d="M 140 150 C 138 155 138 162 139 170 L 161 170 C 162 162 162 155 160 150 Z" fill="url(#gFace)"/>
+  <line x1="141" y1="152" x2="140" y2="168" stroke="${dk(f,.20)}" stroke-width="1.8" opacity=".35"/>
+  <line x1="159" y1="152" x2="160" y2="168" stroke="${dk(f,.20)}" stroke-width="1.8" opacity=".35"/>
+  <ellipse cx="114" cy="98" rx="18" ry="9" fill="${lt(e,.4)}" opacity=".35"/>
+  <ellipse cx="186" cy="98" rx="18" ry="9" fill="${lt(e,.4)}" opacity=".35"/>
+  <ellipse cx="114" cy="104" rx="16" ry="13" fill="#f4f4ff"/>
+  <ellipse cx="186" cy="104" rx="16" ry="13" fill="#f4f4ff"/>
+  <circle  cx="114" cy="105" r="10" fill="url(#gEye)" clip-path="url(#ceL)"/>
+  <circle  cx="186" cy="105" r="10" fill="url(#gEye)" clip-path="url(#ceR)"/>
+  <circle  cx="114" cy="106" r="5"  fill="#0a0508"    clip-path="url(#ceL)"/>
+  <circle  cx="186" cy="106" r="5"  fill="#0a0508"    clip-path="url(#ceR)"/>
+  <circle  cx="111" cy="102" r="2.8" fill="white" opacity=".92" clip-path="url(#ceL)"/>
+  <circle  cx="183" cy="102" r="2.8" fill="white" opacity=".92" clip-path="url(#ceR)"/>
+  <circle  cx="119" cy="109" r="1.4" fill="white" opacity=".55" clip-path="url(#ceL)"/>
+  <circle  cx="191" cy="109" r="1.4" fill="white" opacity=".55" clip-path="url(#ceR)"/>
+  <path d="M 98 104 C 103 93 112 90 114 90 C 116 90 125 93 130 104" stroke="#1a0820" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M 170 104 C 175 93 184 90 186 90 C 188 90 197 93 202 104" stroke="#1a0820" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M 98 104 C 103 116 112 118 114 118 C 116 118 125 116 130 104" stroke="#4a2040" stroke-width="1.2" fill="none" opacity=".55"/>
+  <path d="M 170 104 C 175 116 184 118 186 118 C 188 118 197 116 202 104" stroke="#4a2040" stroke-width="1.2" fill="none" opacity=".55"/>
+  <g stroke="#1a0820" stroke-linecap="round" stroke-width="2">
+    <line x1="99" y1="103" x2="92" y2="92"/><line x1="103" y1="96" x2="99" y2="84"/>
+    <line x1="109" y1="91" x2="108" y2="80"/><line x1="115" y1="90" x2="116" y2="79"/>
+    <line x1="121" y1="91" x2="124" y2="80"/><line x1="127" y1="95" x2="132" y2="86"/>
+    <line x1="130" y1="103" x2="137" y2="95"/>
+    <line x1="201" y1="103" x2="208" y2="92"/><line x1="197" y1="96" x2="201" y2="84"/>
+    <line x1="191" y1="91" x2="192" y2="80"/><line x1="185" y1="90" x2="184" y2="79"/>
+    <line x1="179" y1="91" x2="176" y2="80"/><line x1="173" y1="95" x2="168" y2="86"/>
+    <line x1="170" y1="103" x2="163" y2="95"/>
+  </g>
+  <g stroke="#4a2040" stroke-linecap="round" stroke-width="1.2" opacity=".65">
+    <line x1="100" y1="110" x2="96" y2="117"/><line x1="107" y1="116" x2="105" y2="123"/>
+    <line x1="114" y1="117" x2="114" y2="124"/><line x1="121" y1="116" x2="123" y2="123"/>
+    <line x1="128" y1="111" x2="133" y2="117"/>
+    <line x1="200" y1="110" x2="204" y2="117"/><line x1="193" y1="116" x2="195" y2="123"/>
+    <line x1="186" y1="117" x2="186" y2="124"/><line x1="179" y1="116" x2="177" y2="123"/>
+    <line x1="172" y1="111" x2="167" y2="117"/>
+  </g>
+  <path d="M 96 85 C 100 74 112 68 120 70 C 126 71 131 76 133 82" stroke="#2a1808" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+  <path d="M 204 85 C 200 74 188 68 180 70 C 174 71 169 76 167 82" stroke="#2a1808" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+  <path d="M 148 128 C 146 134 146 140 148 143 C 150 145 152 143 154 140 C 156 134 154 128 152 128" stroke="${s}" stroke-width="1.4" fill="none" opacity=".45"/>
+  <ellipse cx="146" cy="143" rx="3" ry="2" fill="${s}" opacity=".32"/>
+  <ellipse cx="154" cy="143" rx="3" ry="2" fill="${s}" opacity=".32"/>
+  <path d="M 132 150 C 136 162 144 166 150 166 C 156 166 164 162 168 150 C 160 156 150 157 150 157 C 150 157 140 156 132 150 Z" fill="#e05878"/>
+  <path d="M 132 150 C 136 142 142 140 146 143 C 148 144 150 143 150 143 C 150 143 152 144 154 143 C 158 140 164 142 168 150 C 162 147 155 146 150 146 C 145 146 138 147 132 150 Z" fill="#c43460"/>
+  <ellipse cx="150" cy="159" rx="10" ry="4" fill="#f498b0" opacity=".58"/>
+  <ellipse cx="96"  cy="128" rx="18" ry="10" fill="#ff80a0" opacity=".28" filter="url(#blush)"/>
+  <ellipse cx="204" cy="128" rx="18" ry="10" fill="#ff80a0" opacity=".28" filter="url(#blush)"/>
+  <circle cx="85"  cy="118" r="5" fill="none" stroke="#d4a800" stroke-width="2.2"/>
+  <circle cx="215" cy="118" r="5" fill="none" stroke="#d4a800" stroke-width="2.2"/>`;
+}
+
+// ─── LAYER UPDATE ─────────────────────────────────────────
+const BASE = 'layers/';
+
+function applyLayout() {
+  const map = {
+    'l-hair-back':  LAYOUT.hairBack,
+    'l-body-svg':   LAYOUT.body,
+    'l-shoes':      LAYOUT.shoes,
+    'l-outfit':     LAYOUT.outfit,
+    'l-face-svg':   LAYOUT.head,
+    'l-hair-front': LAYOUT.hairFront,
+  };
+  for (const [id, cfg] of Object.entries(map)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.style.transformOrigin = cfg.origin;
+    el.style.transform = `translate(${cfg.tx}px, ${cfg.ty}px) scale(${cfg.scale})`;
+  }
+}
+
+// Apply CSS hair filter to both hair <img> layers
+function applyHairFilter() {
+  const f = HAIRS[st.hair].filter;
+  document.getElementById('l-hair-back').style.filter  = f;
+  document.getElementById('l-hair-front').style.filter = f;
+}
+
+// Load a PNG layer; show placeholder canvas if file not found
+function loadPng(imgId, path, drawPlaceholder) {
+  const el = document.getElementById(imgId);
+  el.onerror = () => {
+    el.src = drawPlaceholder();
+    el.onerror = null;
+  };
+  el.src = path + '?v=1';
+}
+
+// ── Placeholder generators (canvas) ──
+// These are shown until real PNGs exist in layers/
+function placeholderHairBack(id) {
+  const c=document.createElement('canvas'); c.width=300; c.height=620;
+  const ctx=c.getContext('2d');
+  // Only draw for long hairstyles (id ≤ 04 or 12/16)
+  const longIds=['01','02','03','04','12','16'];
+  const prefix=id.slice(0,2);
+  if(longIds.includes(prefix)){
+    ctx.fillStyle='rgba(140,140,140,0.85)';
+    ctx.beginPath();
+    ctx.roundRect(74,90,152,460,20);
+    ctx.fill();
+    // center part (will be covered by body/outfit)
+    ctx.clearRect(105,160,90,320);
+  }
+  return c.toDataURL();
+}
+
+function placeholderHairFront(id) {
+  const c=document.createElement('canvas'); c.width=300; c.height=620;
+  const ctx=c.getContext('2d');
+  if(id==='08-bald') return c.toDataURL(); // bald = empty
+  ctx.fillStyle='rgba(140,140,140,0.90)';
+  // Hair cap covering head
+  ctx.beginPath();
+  ctx.ellipse(150,85,68,70,0,0,Math.PI*2);
+  ctx.fill();
+  // Short styles: stop at ear level
+  const longIds=['01','02','03','04','12','16'];
+  const prefix=id.slice(0,2);
+  if(longIds.includes(prefix)){
+    // Side curtains
+    ctx.beginPath();
+    ctx.roundRect(74,100,30,200,10);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.roundRect(196,100,30,200,10);
+    ctx.fill();
+  }
+  return c.toDataURL();
+}
+
+function placeholderOutfit(id) {
+  const c=document.createElement('canvas'); c.width=300; c.height=620;
+  const ctx=c.getContext('2d');
+  // Simple colored dress shape
+  const colors={'01':'#b8e0f5','02':'#3a7d3e','03':'#2060c0','04':'#a8ccdc',
+                '05':'#ff80ab','06':'#ff6fa3','07':'#f8e050','08':'#4caf50',
+                '09':'#f8e840','10':'#9c27b0','11':'#ff3a8a','12':'#3d8bc7',
+                '13':'#ff3a8a','14':'#bce4f5','15':'#ff80ab','16':'#1a1a1a',
+                '17':'#f8f8f8','18':'#e8e8e8','19':'#f8f8f8','20':'#9c27b0',
+                '21':'#f8e840','22':'#ff3a8a'};
+  const col=colors[id.slice(0,2)]||'#cccccc';
+  ctx.fillStyle=col;
+  // Torso rectangle
+  ctx.beginPath();
+  ctx.roundRect(103,162,94,130,8);
+  ctx.fill();
+  // Skirt/pants triangle
+  ctx.beginPath();
+  ctx.moveTo(95,292); ctx.lineTo(205,292); ctx.lineTo(230,560); ctx.lineTo(70,560);
+  ctx.closePath();
+  ctx.fill();
+  return c.toDataURL();
+}
+
+function placeholderShoes(id) {
+  const c=document.createElement('canvas'); c.width=300; c.height=620;
+  const ctx=c.getContext('2d');
+  if(id==='00-barefoot') return c.toDataURL();
+  const colors={'01':'#f8f8f8','02':'#c03030','03':'#ff90b8','04':'#ffd6e3',
+                '05':'#8b4513','06':'#f0e040','07':'#8b4513','08':'#ffffff',
+                '09':'#d32f2f','10':'#ff3a8a','11':'#f8e040','12':'#3d8bc7',
+                '13':'#b8d8f0','14':'#1a1a1a','15':'#ff3a8a','16':'#a06a40'};
+  const col=colors[id.slice(0,2)]||'#cccccc';
+  ctx.fillStyle=col;
+  ctx.beginPath(); ctx.ellipse(122,568,28,13,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(178,568,28,13,0,0,Math.PI*2); ctx.fill();
+  return c.toDataURL();
+}
+
+// ─── MAIN RENDER ──────────────────────────────────────────
+function render() {
+  const sk=SKINS[st.skin], ey=EYES[st.eyes];
+  const hs=HS[st.hs], ot=OT[st.ot], sh=SH[st.sh];
+
+  // SVG body (layer 2 — behind outfit)
+  document.getElementById('svg-defs').innerHTML      = buildBodyDefs(sk);
+  document.getElementById('g-body').innerHTML        = renderBody(sk);
+  // SVG face (layer 5 — above outfit, below hair-front)
+  document.getElementById('svg-face-defs').innerHTML = buildFaceDefs(sk,ey);
+  document.getElementById('g-face').innerHTML        = renderFace(ey,sk);
+
+  // PNG layers (with canvas placeholder fallback)
+  loadPng('l-hair-back',  `${BASE}hair-back/${hs.id}.png`,  ()=>'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
+  loadPng('l-outfit',     `${BASE}outfit/${ot.id}.png`,     ()=>placeholderOutfit(ot.id));
+  loadPng('l-shoes',      `${BASE}shoes/${sh.id}.png`,      ()=>placeholderShoes(sh.id));
+  loadPng('l-hair-front', `${BASE}hair-front/${hs.id}.png`, ()=>placeholderHairFront(hs.id));
+
+  applyHairFilter();
+  applyLayout();
+
+  // SVG accessories
+  let acc='';
+  if(hs.acc) acc+=hs.acc();
+  if(ot.acc) acc+=ot.acc();
+  document.getElementById('g-acc').innerHTML=acc;
+
+  // Labels
+  document.getElementById('n-hs').textContent=hs.name.toUpperCase();
+  document.getElementById('n-ot').textContent=ot.name.toUpperCase();
+  document.getElementById('n-sh').textContent=sh.name.toUpperCase();
+
+  // Swatch active states
+  document.querySelectorAll('#sw-skin .swatch').forEach((e,i)=>e.classList.toggle('on',i===st.skin));
+  document.querySelectorAll('#sw-eye  .swatch').forEach((e,i)=>e.classList.toggle('on',i===st.eyes));
+  document.querySelectorAll('#sw-hair .swatch').forEach((e,i)=>e.classList.toggle('on',i===st.hair));
+}
+
+// ─── SWATCHES ─────────────────────────────────────────────
+function mkSw(id,pal,key){
+  const c=document.getElementById(id); c.innerHTML='';
+  pal.forEach((p,i)=>{
+    const d=document.createElement('div');
+    d.className='swatch'; d.style.background=p.f; d.title=p.n;
+    d.onclick=()=>{st[key]=i;render();};
+    c.appendChild(d);
+  });
+}
+
+// ─── ARROWS ───────────────────────────────────────────────
+const cycle=(key,L,dir)=>{st[key]=(st[key]+dir+L.length)%L.length;render();};
+document.getElementById('hs-p').onclick=()=>cycle('hs',HS,-1);
+document.getElementById('hs-n').onclick=()=>cycle('hs',HS,+1);
+document.getElementById('ot-p').onclick=()=>cycle('ot',OT,-1);
+document.getElementById('ot-n').onclick=()=>cycle('ot',OT,+1);
+document.getElementById('sh-p').onclick=()=>cycle('sh',SH,-1);
+document.getElementById('sh-n').onclick=()=>cycle('sh',SH,+1);
+
+// ─── SAVE ─────────────────────────────────────────────────
+document.getElementById('save').onclick=()=>{
+  const wrap=document.getElementById('doll-wrap');
+  const w=300,h=620;
+  const cv=document.createElement('canvas'); cv.width=w*2; cv.height=h*2;
+  const ctx=cv.getContext('2d');
+  ctx.scale(2,2);
+  ctx.fillStyle='#fff8f0'; ctx.fillRect(0,0,w,h);
+
+  // Draw each layer in order
+  const layers=[
+    document.getElementById('l-hair-back'),
+    null, // body SVG - drawn via foreignObject trick below
+    document.getElementById('l-outfit'),
+    document.getElementById('l-shoes'),
+    document.getElementById('l-hair-front'),
+  ];
+
+  const bodySvg=document.getElementById('l-body-svg');
+  const faceSvg=document.getElementById('l-face-svg');
+  const accSvg=document.getElementById('l-acc-svg');
+
+  function drawSvgToCanvas(svgEl,cb){
+    const data=new XMLSerializer().serializeToString(svgEl);
+    const img=new Image();
+    img.onload=()=>{ctx.drawImage(img,0,0,w,h);cb();};
+    img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(data);
+  }
+
+  function drawImgLayer(imgEl,filter,cb){
+    if(!imgEl.src||imgEl.src===window.location.href){cb();return;}
+    const img=new Image(); img.crossOrigin='anonymous';
+    img.onload=()=>{
+      ctx.save();
+      if(filter){
+        // Approximate filter via off-screen canvas (basic approach)
+      }
+      ctx.drawImage(img,0,0,w,h);
+      ctx.restore();
+      cb();
+    };
+    img.onerror=cb;
+    img.src=imgEl.src;
+  }
+
+  // Sequential render pipeline
+  drawImgLayer(document.getElementById('l-hair-back'),HAIRS[st.hair].filter,()=>{
+    drawSvgToCanvas(bodySvg,()=>{
+      drawImgLayer(document.getElementById('l-outfit'),null,()=>{
+        drawImgLayer(document.getElementById('l-shoes'),null,()=>{
+          drawSvgToCanvas(faceSvg,()=>{
+          drawImgLayer(document.getElementById('l-hair-front'),HAIRS[st.hair].filter,()=>{
+            drawSvgToCanvas(accSvg,()=>{
+              cv.toBlob(b=>{
+                const u=URL.createObjectURL(b);
+                const a=document.createElement('a');
+                a.href=u; a.download=`panenka-${Date.now()}.png`;
+                document.body.appendChild(a); a.click();
+                document.body.removeChild(a);
+                setTimeout(()=>URL.revokeObjectURL(u),1000);
+              },'image/png');
+            });
+          });
+          });
+        });
+      });
+    });
+  });
+};
+
+// ─── FIT DOLL (responzivní škálování) ────────────────────
+// Celý doll-canvas (300×620) se vejde do dostupného prostoru.
+// doll-wrap dostane správnou logickou velikost pro flexbox centering.
+function fitDoll() {
+  const stage  = document.querySelector('.stage-inner');
+  const availW = stage.clientWidth  - 12;
+  const availH = stage.clientHeight - 12;
+  const scale  = Math.min(availW / 300, availH / 620);
+  const canvas = document.getElementById('doll-canvas');
+  canvas.style.transform = `scale(${scale})`;
+  const wrap = document.getElementById('doll-wrap');
+  wrap.style.width  = Math.round(300 * scale) + 'px';
+  wrap.style.height = Math.round(620 * scale) + 'px';
+}
+window.addEventListener('resize', fitDoll);
+
+// ─── INIT ─────────────────────────────────────────────────
+mkSw('sw-skin',SKINS,'skin');
+mkSw('sw-eye', EYES, 'eyes');
+mkSw('sw-hair',HAIRS,'hair');
+render();
+fitDoll();
+</script>
+</body>
+</html>
